@@ -42,7 +42,9 @@ readonly SECTION_TYPE='net'
 readonly DESC_SHORT='Tox client'
 readonly DESC_LONG='The lightest and fluffiest Tox client.'
 readonly BUILD_DEPENDENCIES='debhelper (>= 9), libvpx-dev, libfontconfig1-dev, libdbus-1-dev, libv4l-dev, libxrender-dev, libopenal-dev, libxext-dev, libtoxcore-dev, libfilteraudio-dev, libtoxav-dev, libtoxencryptsave-dev, libtoxdns-dev'
-readonly BUILD_TARGETS=('jessie')
+
+readonly TARGET_DISTS=('jessie')
+readonly TARGET_ARCHS=('amd64')
 
 # Main function 
 main() {
@@ -86,9 +88,10 @@ main() {
 			# Gets the version
 			client_version=$(get_version)
 			
-			# 
+			# Asks user to validate changes
 			echo "On the way to build ${CLIENT_NAME} ${client_version}!"
-			echo "Target versions: ${BUILD_TARGETS[@]}"
+			echo "Target versions: ${TARGET_DISTS[@]}"
+			echo "Target architectures: ${TARGET_ARCHS[@]}"
 			read -p "Is this OK? [Y/n] " entry
 			case $entry in
 				Y)
@@ -102,6 +105,11 @@ main() {
 					error 'incorrect_entry' "$entry"
 					;;
 			esac
+			;;
+		
+		# Setup the pbuilder configuration
+		--setup-pbuilder)
+			setup_builder
 			;;
 		
 		# Displays the help
@@ -121,9 +129,6 @@ main() {
 
 # Get the source code from github
 get_source() {
-
-	# Clean the previous version of the program built
-	rm -rf $(find . -maxdepth 1 -name "${CLIENT_NAME,,}[-_][0-9]*")
 	
 	# If the code has already been cloned, update
 	if [[ -d "${CLIENT_NAME,,}_src" ]]
@@ -167,7 +172,10 @@ prepare_source() {
 	# Local variables
 	local client_version="$1"
 	local parent_folder
-
+	
+	# Clean the previous version of the program built if there is any
+	rm -rf $(find . -maxdepth 1 -name "${CLIENT_NAME,,}[-_][0-9]*")
+	
 	# Correctly rename the source folder (becoming the parent folder)
 	parent_folder="${CLIENT_NAME,,}-${client_version}"
 	cp -r "${CLIENT_NAME,,}_src" "${parent_folder}"
@@ -215,18 +223,14 @@ prepare_source() {
 	# Set the destination prefix as /
 	echo -e 'override_dh_auto_install:\n\tdh_auto_install -- PREFIX=/usr' >> debian/rules
 	
-	# Set the distribution as jessie
-	# TODO: To change of course
-	sed -i 's/unstable/jessie/g' debian/changelog
+	# Set the distribution as UNRELEASED at first
+	sed -i '1s/unstable/UNRELEASED/g' debian/changelog
 	
 	# Get the changelog from the author
 	echo 'YOUR INPUT IS NEEDED!'
 	echo "Please enter the changelog for this version of ${CLIENT_NAME}"
 	read -p 'Press enter to edit... '
 	dch -e
-	
-	# Call debuild to generate the .dsc file
-	debuild -S --lintian-opts -i -sa
 	
 	return 0
 }
@@ -235,17 +239,54 @@ prepare_source() {
 build_client() {
 
 	# Local variables
-	local target
-
-	# For each target, build the client
-	for target in ${BUILD_TARGETS[@]}
+	local client_version=$1
+	local architecture target
+	local previous_target='UNRELEASED'
+	
+	# For each architecture
+	for architecture in ${TARGET_ARCHS[@]}
 	do
 	
-		# Launches the building process
-		# TODO: To review: only works with jessie for now
-		pbuilder --build --basetgz "/var/cache/pbuilder/${target}-amd64.tgz" *.dsc
+		# For each target
+		for target in ${TARGET_DISTS[@]}
+		do
 	
+			# Clean the previously generated .dsc file
+			rm -rf *.dsc *.tar.xz *.build *.changes
+		
+			# Go to the child directory to setup the version
+			cd "${CLIENT_NAME,,}-${client_version}"
+		
+			# Change the distribution et keeps the target
+			sed -i "1s/${previous_target}/${target}/g" debian/changelog
+			previous_target="${target}"
+			
+			# Call debuild to generate the .dsc file
+			debuild -S --lintian-opts -i -sa
+		
+			# Go to the parent directory to call pbuilder
+			cd ..
+			pbuilder --build --basetgz "/var/cache/pbuilder/${target}-${architecture}.tgz" *.dsc
+			
+			# Saves the result in a folder
+			mkdir "${CLIENT_NAME,,}_build_v${client_version}_${target}_${architecture}"
+			mv /var/cache/pbuilder/result/* "${CLIENT_NAME,,}_build_v${client_version}_${target}_${architecture}"
+		
+		done
+		
 	done
+	
+	# Final cleanup
+	rm -rf $(find . -maxdepth 1 -name "${CLIENT_NAME,,}[-_][0-9]*")
+	
+	return 0
+}
+
+# Setup the pbuilder configuration
+setup_pbuilder() {
+
+	# TODO
+	return 0
 }
 
 # Error handling
@@ -281,9 +322,11 @@ error() {
 help() {
 
 	cat <<- EOF
-	Usage: ${PROGNAME} <--help> <--prepare-source> <--build>
+	Usage: ${PROGNAME} [option]
 	
+	Options:
 	  --help: Displays this help.
+	  --setup-pbuilder: Setup a working pbuilder configuration.
 	  --prepare-source: Gets the latest sources of the repository "GIT_REPO" and prepare the .dsc file.
 	  --build: Uses pbuilder to build the Tox client.
 	
