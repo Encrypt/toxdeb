@@ -90,8 +90,8 @@ main() {
 			
 			# Asks user to validate changes
 			echo "On the way to build ${CLIENT_NAME} ${client_version}!"
-			echo "Target versions: ${TARGET_DISTS[@]}"
-			echo "Target architectures: ${TARGET_ARCHS[@]}"
+			echo "Target version(s): ${TARGET_DISTS[@]}"
+			echo "Target architecture(s): ${TARGET_ARCHS[@]}"
 			read -p "Is this OK? [Y/n] " entry
 			case $entry in
 				Y)
@@ -267,6 +267,7 @@ build_client() {
 			# Go to the parent directory to call pbuilder
 			cd ..
 			pbuilder --build --basetgz "/var/cache/pbuilder/${target}-${architecture}.tgz" *.dsc
+			[[ $? -ne 0 ]] && { error 'pbuilder_failed' ; return $?; }
 			
 			# Saves the result in a folder
 			mkdir "${CLIENT_NAME,,}_build_v${client_version}_${target}_${architecture}"
@@ -309,6 +310,9 @@ error() {
 			;;
 		incorrect_entry)
 			echo "Incorrect entry: $2. Abort." >&2
+			;;
+		pbuilder_failed)
+			echo "Pbuilder failed. Consult the logs for more information." >&2
 			;;
 		*)
 			echo "Unrecognized error: $err." >&2
