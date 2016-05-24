@@ -326,18 +326,20 @@ error() {
 help() {
 
 	cat <<- EOF
-	Usage: ${PROGNAME} [option]
+	Usage: ${PROGNAME} [ prepare <options> | build ]
 	
-	Options:
-	  --help: Displays this help.
-	  --setup-pbuilder: Setup a working pbuilder configuration.
-	  --prepare-source: Gets the latest sources of the repository "GIT_REPO" and prepare the .dsc file.
-	  --build: Uses pbuilder to build the Tox client.
+	Operations:
+	  prepare: Gets the latest sources of the repository "GIT_REPO" and prepares the .dsc file.
+	  build: Uses pbuilder to build the Tox client from the .dsc file given.
 	
-	Note that --build should be run as root and the other options as an unpriviledged user.
-	One will probably run: ./${PROGNAME} --prepare-source && sudo ./${PROGNAME} --build
+	Options of "prepare":
+	  --architecture: Sets the target architecture.
+	  --distribution: Sets the target distribution.
 	
-	Plese make sure that the configuration is correct before running this tool.
+	Note that "prepare" should be run as an unpriviledged user, whereas "build" should be run as root.
+	One will probably run: ./${PROGNAME} prepare --distribution jessie --architecture amd64 && sudo ./${PROGNAME} build
+	
+	Please make sure that the configuration is correct before running this tool.
 	EOF
 
 	return 0
