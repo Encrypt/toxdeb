@@ -51,11 +51,7 @@ main() {
 	local i distribution architecture
 	
 	# Check the number of arguments before going forward
-	if [[ ${ARGS_NB} -lt 1 ]]
-	then
-		error 'argument_missing'
-		return $?
-	fi
+	[[ ${ARGS_NB} -lt 1 ]] && { error 'argument_missing' ; return $? ; }
 	
 	# Get the command given
 	case ${ARGS[0]} in
@@ -64,16 +60,24 @@ main() {
 		prepare)
 		
 			# Check the number of arguments before going forward
-			if [[ ${ARGS_NB} -ne 3 ]]
-			then
-				error 'command_options'
-				return $?
-			fi
+			[[ ${ARGS_NB} -ne 5 ]] && { error 'prepare_options' ; return $? ; }
 			
-			# Get the distribution
-			[[ ${ARGS[1]} == '--distribution' ]] \
-				&& distribution=${ARGS[2]} \
-				|| { error 'unknown_option' "${ARGS[1]}" 'prepare' ; return $? ; }
+			# Get the arguments
+			for i in 1 3
+			do
+				case ${ARGS[$i]} in
+					--distribution)
+						distribution=${ARGS[$(($i + 1))]}
+						;;
+					--architecture)
+						architecture=${ARGS[$(($i + 1))]}
+						;;
+					*)
+						error unknown_option "${ARGS[$i]}"
+						return $?
+						;;
+				esac
+			done
 			
 			# Warn if this is run as root
 			[[ $(id -u) -eq 0 ]] && echo "WARNING: You shouldn't run ./${PROGNAME} ${ARGS[0]} with root privileges."
@@ -83,51 +87,49 @@ main() {
 			client_version=$(get_version)
 			prepare_source "$client_version" "$distribution"
 			
+			# Save the configuration for the next step
+			cat <<- EOF > .toxdeb_prepared
+			version=${client_version}
+			distribution=${distribution}
+			architecture=${architecture}
+			EOF
+			
 			# Instructions for the next step
 			echo 'INFO: The sources are ready to be built.'
-			echo "INFO: Run ./${PROGNAME} build --architecture <arch> as root to build ${CLIENT_NAME}."
+			echo "INFO: Run ./${PROGNAME} build as root to build ${CLIENT_NAME}."
 			;;
 			
 		# Build the clients with pbuilder
 		build)
 		
 			# Check the number of arguments before going forward
-			if [[ ${ARGS_NB} -ne 3 ]]
-			then
-				error 'command_options'
-				return $?
-			fi
-			
-			# Get the architecture
-			[[ ${ARGS[1]} == '--architecture' ]] \
-				&& architecture=${ARGS[2]} \
-				|| { error 'unknown_option' "${ARGS[1]}" 'build' ; return $? ; }
+			[[ ${ARGS_NB} -ne 1 ]] && { error 'build_options' ; return $? ; }
 			
 			# Build should be run as root
 			[[ $(id -u) -ne 0 ]] && { error 'build_root' ; return $? ; }
 			
-			# Get the version
-			client_version=$(get_version)
-			
-			# Get the distribution and architecture previously configured
-			distribution=$(head -n 1 ${CLIENT_NAME,,}-${client_version}/debian/changelog | sed 's/.*) //;s/;.*//')
+			# Gets the parameters previously configured
+			client_version=$(grep 'version' .toxdeb_prepared | sed 's/version=//')
+			distribution=$(grep 'distribution' .toxdeb_prepared | sed 's/distribution=//')
+			architecture=$(grep 'architecture' .toxdeb_prepared | sed 's/architecture=//')
 			
 			# Check if the pbuilder chroot exists...
-			[[ -e "/var/cache/pbuilder/${distribution}-${architecture}.tar.gz" ]] \
-				|| { error 'chroot_nonexistent' "$distribution" "$arch" ; return $? ; }
-			
-			# Get the version
-			client_version=$(get_version)
+			[[ -e "/var/cache/pbuilder/${distribution}-${architecture}.tgz" ]] \
+				|| { error 'chroot_nonexistent' "$distribution" "$architecture" ; return $? ; }
 			
 			# Info
 			echo "INFO: Now building ${CLIENT_NAME} ${client_version}!"
+			echo "INFO: Distribution: $distribution / Architecture: $architecture"
 			
 			# Launch the build process
-			build_client "$client_version" "$architecture"
+			build_client "$client_version" "$distribution" "$architecture"
+			
+			# Remove the save file
+			rm .toxdeb_prepared
 			;;
 			
 		# Displays the help
-		--help)
+		help)
 			help
 			;;
 		
@@ -179,14 +181,12 @@ get_version() {
 	return 0
 }
 
-
 # Prepare the source for pbuilder, generating a .dsc file
 prepare_source() {
 
 	# Local variables
 	local client_version=$1
 	local distribution=$2
-	local architecture=$3
 	local parent_folder
 	
 	# Clean the previous version of the program built if there is any
@@ -239,7 +239,7 @@ prepare_source() {
 	# Set the destination prefix as /
 	echo -e 'override_dh_auto_install:\n\tdh_auto_install -- PREFIX=/usr' >> debian/rules
 	
-	# Set the distribution as UNRELEASED at first
+	# Set the distribution
 	sed -i "1s/unstable/${distribution}/g" debian/changelog
 	
 	# Get the changelog from the author
@@ -251,6 +251,9 @@ prepare_source() {
 	# Call debuild to generate the .dsc file
 	debuild -S --lintian-opts -i -sa
 	
+	# Back to the parent directory
+	cd ..
+	
 	return 0
 }
 
@@ -259,13 +262,14 @@ build_client() {
 
 	# Local variables
 	local client_version=$1
-	local architecture=$2
+	local distribution=$2
+	local architecture=$3
 	
 	# Call pbuilder
 	pbuilder --build --basetgz "/var/cache/pbuilder/${distribution}-${architecture}.tgz" *.dsc
 	[[ $? -ne 0 ]] && { error 'pbuilder_failed' ; return $?; }
 	
-	# Saves the result in a folder
+	# Save the result in a folder
 	mkdir "${CLIENT_NAME,,}_build_v${client_version}_${target}_${architecture}"
 	mv /var/cache/pbuilder/result/* "${CLIENT_NAME,,}_build_v${client_version}_${target}_${architecture}"
 	
@@ -285,13 +289,17 @@ error() {
 	case $err in
 		argument_missing)
 			echo "${PROGNAME} expects at least one argument." >&2
-			echo "Use ${PROGNAME} --help to get further help." >&2
+			echo "Use \"${PROGNAME} help\" to get further help." >&2
 			;;
-		command_options)
-			echo "Both 'prepare' and 'build' expect an option with a value." >&2
+		prepare_options)
+			echo 'The operation "prepare" expects 2 options with their respective values.' >&2
+			echo "Use \"${PROGNAME} help\" to get further help." >&2
+			;;
+		build_options)
+			echo 'The operation "build" does not expect any argument.' >&2
 			;;
 		unknown_option)
-			echo "Unknown option $2 for operation '$3'." >&2
+			echo "Unknown option $2 for operation \"prepare\"." >&2
 			;;
 		chroot_nonexistent)
 			echo "Nonexistent base .tar.gz for distribution $2 and architecture $3!" >&2
@@ -300,10 +308,7 @@ error() {
 			echo "Unknown operation $2." >&2
 			;;
 		build_root)
-			echo "${PROGNAME} requires root privileges to run the operation 'build'." >&2
-			;;
-		incorrect_entry)
-			echo "Incorrect entry: $2. Abort." >&2
+			echo "${PROGNAME} requires root privileges to run the operation \"build\"." >&2
 			;;
 		pbuilder_failed)
 			echo "Pbuilder failed. Consult the logs for more information." >&2
@@ -320,19 +325,20 @@ error() {
 help() {
 
 	cat <<- EOF
-	Usage: ${PROGNAME} [ prepare | build ] <option>
+	Usage: ${PROGNAME} [ prepare <options> | build | help ]
 	
 	Operations:
 	  prepare: Gets the latest sources of the repository "GIT_REPO" and prepares the .dsc file.
-	  build: Uses pbuilder to build the Tox client from the .dsc file given.
+	  build: Uses pbuilder to build the Tox client from the .dsc file generated.
+	  help: Displays this help.
 	
-	Options:
-	  --distribution: Sets the target distribution, should be used with "prepare".
-	  --architecture: Sets the target architecture, should be used with "build".
+	Options of "prepare":
+	  --distribution: Sets the target distribution.
+	  --architecture: Sets the target architecture.
 	
 	Note that "prepare" should be run as an unpriviledged user, whereas "build" should be run as root.
 	
-	One will probably run: ./${PROGNAME} prepare --distribution jessie && sudo ./${PROGNAME} build --architecture amd64
+	One will probably run: ./${PROGNAME} prepare --distribution jessie --architecture amd64 && sudo ./${PROGNAME} build 
 	Please make sure that the configuration is correct before running this tool.
 	EOF
 
