@@ -25,7 +25,7 @@ readonly ARGS_NB=$#
 
 # Configuration of the script
 readonly CLIENT_NAME='uTox'
-readonly MAIN_FILE='main.h'
+readonly VERSION_FILE='main.h'
 
 readonly GIT_REPO='https://github.com/GrayHatter/uTox.git'
 readonly HTTP_REPO='https://github.com/grayhatter/utox'
@@ -170,13 +170,13 @@ get_source() {
 get_version() {
 
 	# Local variables
-	local main_headers
+	local version_files
 
 	# Get the "main" headers in the folder
-	main_headers=($(find "${CLIENT_NAME,,}_src" -name "${MAIN_FILE}"))
+	version_files=($(find "${CLIENT_NAME,,}_src" -name "${VERSION_FILE}"))
 	
 	# Return the version
-	echo $(grep VERSION ${main_headers[@]} | grep -oE '([0-9]{1,}\.)+[0-9]{1,}')	
+	echo $(grep VERSION ${version_files[@]} | grep -oE '([0-9]{1,}\.)+[0-9]{1,}')
 	
 	return 0
 }
@@ -302,7 +302,7 @@ error() {
 			echo "Unknown option $2 for operation \"prepare\"." >&2
 			;;
 		chroot_nonexistent)
-			echo "Nonexistent base .tar.gz for distribution $2 and architecture $3!" >&2
+			echo "Nonexistent base .tgz for distribution $2 and architecture $3!" >&2
 			;;
 		unknown_operation)
 			echo "Unknown operation $2." >&2
