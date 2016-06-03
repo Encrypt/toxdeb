@@ -23,31 +23,11 @@ readonly PROGNAME=$(basename $0)
 readonly ARGS=("$@")
 readonly ARGS_NB=$#
 
-# Configuration of the script
-readonly CLIENT_NAME='uTox'
-readonly VERSION_FILE='main.h'
-
-readonly GIT_REPO='https://github.com/GrayHatter/uTox.git'
-readonly HTTP_REPO='https://github.com/grayhatter/utox'
-readonly BUILD_BRANCH='master'
-
-readonly MAINT_NAME='Yann Prive'
-readonly MAINT_EMAIL='encrypt@encrypt-tips.tk'
-
-readonly COPYRIGHT_YEARS="2014-$(date '+%Y')"
-readonly COPYRIGHT_WEBSITE='http://utox.org'
-readonly COPYRIGHT_ORGANISATION='cmdline <http://cmdline.org>'
-
-readonly SECTION_TYPE='net'
-readonly DESC_SHORT='Tox client'
-readonly DESC_LONG='The lightest and fluffiest Tox client.'
-readonly BUILD_DEPENDENCIES='debhelper (>= 9), libvpx-dev, libfontconfig1-dev, libdbus-1-dev, libv4l-dev, libxrender-dev, libopenal-dev, libxext-dev, libtoxcore-dev, libfilteraudio-dev, libtoxav-dev, libtoxencryptsave-dev, libtoxdns-dev'
-
 # Main function 
 main() {
 	
 	# Local variables
-	local client_version
+	local client_version conf_file
 	local i distribution architecture
 	
 	# Check the number of arguments before going forward
@@ -60,16 +40,19 @@ main() {
 		prepare)
 		
 			# Check the number of arguments before going forward
-			[[ ${ARGS_NB} -ne 5 ]] && { error 'prepare_options' ; return $? ; }
+			[[ ${ARGS_NB} -ne 7 ]] && { error 'prepare_options' ; return $? ; }
 			
 			# Get the arguments
-			for i in 1 3
+			for i in 1 3 5
 			do
 				case ${ARGS[$i]} in
-					--distribution)
+					--conf)
+						conf_file=${ARGS[$(($i + 1))]}
+						;;
+					--dist)
 						distribution=${ARGS[$(($i + 1))]}
 						;;
-					--architecture)
+					--arch)
 						architecture=${ARGS[$(($i + 1))]}
 						;;
 					*)
@@ -78,6 +61,11 @@ main() {
 						;;
 				esac
 			done
+			
+			# Source the configuration file exists
+			[[ -e ${conf_file} ]] \
+				&& source ${conf_file} \
+				|| { error 'conf_file' "${conf_file}" ; return $? ; }
 			
 			# Warn if this is run as root
 			[[ $(id -u) -eq 0 ]] && echo "WARNING: You shouldn't run ./${PROGNAME} ${ARGS[0]} with root privileges."
@@ -90,6 +78,7 @@ main() {
 			# Save the configuration for the next step
 			cat <<- EOF > .toxdeb_prepared
 			version=${client_version}
+			configuration=${conf_file}
 			distribution=${distribution}
 			architecture=${architecture}
 			EOF
@@ -110,8 +99,12 @@ main() {
 			
 			# Gets the parameters previously configured
 			client_version=$(grep 'version' .toxdeb_prepared | sed 's/version=//')
+			conf_file=$(grep 'configuration' .toxdeb_prepared | sed 's/configuration=//')
 			distribution=$(grep 'distribution' .toxdeb_prepared | sed 's/distribution=//')
 			architecture=$(grep 'architecture' .toxdeb_prepared | sed 's/architecture=//')
+			
+			# Source the configuration file
+			source ${conf_file}
 			
 			# Check if the pbuilder chroot exists...
 			[[ -e "/var/cache/pbuilder/${distribution}-${architecture}.tgz" ]] \
@@ -248,8 +241,8 @@ prepare_source() {
 	read -p 'Press enter to edit... '
 	dch -e
 	
-	# Call debuild to generate the .dsc file
-	debuild -S --lintian-opts -i -sa
+	# Call dpkg-source to generate the .dsc file
+	dpkg-source -b .
 	
 	# Back to the parent directory
 	cd ..
@@ -291,8 +284,11 @@ error() {
 			echo "${PROGNAME} expects at least one argument." >&2
 			echo "Use \"${PROGNAME} help\" to get further help." >&2
 			;;
+		conf_file)
+			echo "The configuration file ($2) given has argument doesn't exist." >&2
+			;;
 		prepare_options)
-			echo 'The operation "prepare" expects 2 options with their respective values.' >&2
+			echo 'The operation "prepare" expects 3 options with their respective values.' >&2
 			echo "Use \"${PROGNAME} help\" to get further help." >&2
 			;;
 		build_options)
@@ -333,8 +329,9 @@ help() {
 	  help: Displays this help.
 	
 	Options of "prepare":
-	  --distribution: Sets the target distribution.
-	  --architecture: Sets the target architecture.
+	  --conf: Path to the configuration file.
+	  --dist: Sets the target distribution.
+	  --arch: Sets the target architecture.
 	
 	Note that "prepare" should be run as an unpriviledged user, whereas "build" should be run as root.
 	
