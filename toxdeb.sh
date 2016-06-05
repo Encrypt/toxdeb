@@ -269,7 +269,7 @@ prepare_source() {
 		sed -i '1,2!d' debian/changelog
 		
 		# Inserts the changelog
-		awk '{if(match($0, /## v?([0-9]\.){2}[0-9].*/) != 0){i++} ; if(match($0, /#### .*/) != 0){j++} ; if(i != 2 && j >= 1){print} else if(i == 2){exit}}' ${changelog_file} | \
+		gawk '{if(match($0, /## v?([0-9]\.){2}[0-9].*/) != 0){i++} ; if(match($0, /#### .*/) != 0){j++} ; if(i != 2 && j >= 1){print} else if(i == 2){exit}}' ${changelog_file} | \
 		sed -e '/^</d' \
 			-e '/^$/d' \
 			-e 's/  \+\([^*]\)/ \1/g' \
