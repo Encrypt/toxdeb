@@ -205,6 +205,7 @@ prepare_source() {
 	local distribution=$2
 	local parent_folder
 	local changelog_file changelog_footer
+	local manpage
 	
 	# Sets the parent_folder
 	parent_folder="${CLIENT_NAME,,}-${client_version}"
@@ -237,7 +238,9 @@ prepare_source() {
 		-i debian/copyright
 	
 	# Add the manpage
-	cp $(find . -name ${CLIENT_NAME,,}.1) debian/ \
+	manpage=$(find . -name ${CLIENT_NAME,,}.1)
+	[[ -n "$manpage" ]] \
+		&& cp $manpage debian/ \
 		|| echo 'WARNING: No manpage found!'
 	
 	# Set the menu file
