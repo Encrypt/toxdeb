@@ -28,7 +28,8 @@ main() {
 	
 	# Local variables
 	local client_version config i
-	local dist arch config conf_file
+	local config client dist arch
+	local conf_file
 	
 	# Check the number of arguments before going forward
 	[[ ${ARGS_NB} -lt 1 ]] && { error 'argument_missing' ; return $? ; }
@@ -50,9 +51,27 @@ main() {
 					
 					# Get the information from the Jenkins job name
 					config=$(get_config_auto)
+					client=$(echo $config | cut -d ',' -f 1)
 					dist=$(echo $config | cut -d ',' -f 2)
 					arch=$(echo $config | cut -d ',' -f 3)
-					conf_file="./configs/$(echo $config | cut -d ',' -f 1)-${dist}.cfg"
+					
+					# Use the specific config file if possible
+					if [[ -e "./configs/${client}-${dist}.cfg" ]]
+					then
+						echo "INFO: Using configuration file ${client}-${dist}.cfg"
+						conf_file="./configs/${client}-${dist}.cfg"
+						
+					# If it doesn't exist, use the default one
+					elif [[ -e "./configs/${client}-default.cfg" ]]
+					then
+						echo "INFO: Using configuration file ${client}-default.cfg"
+						conf_file="./configs/${client}-default.cfg"
+					
+					# Else, you can't go much further :P
+					else
+						error 'conf_file' "${client}-${dist}.cfg or ${client}-default.cfg"
+						return $?
+					fi
 					;;
 				
 				# ... manually given as options
@@ -80,6 +99,9 @@ main() {
 								;;
 						esac
 					done
+					
+					# Test if the configuration file exists
+					[[ -e "$conf_file" ]] || { error 'conf_file' "${conf_file}" ; return $? ; }
 					;;
 				
 				# Wrong argument
@@ -89,10 +111,8 @@ main() {
 					;;
 			esac
 			
-			# Source the appropriate configuration file if it exists
-			[[ -e "$conf_file" ]] \
-				&& source ${conf_file} \
-				|| { error 'conf_file' "${conf_file}" ; return $? ; }
+			# Source the configuration file
+			source ${conf_file}
 			
 			# Tests the presence of the source folder
 			[[ -d "${CLIENT_NAME,,}_src" ]] \
@@ -329,7 +349,7 @@ error() {
 			echo "Use \"${PROGNAME} help\" to get further help." >&2
 			;;
 		conf_file)
-			echo "The configuration file ($2) given has argument doesn't exist." >&2
+			echo "The configuration file ($2) doesn't exist." >&2
 			;;
 		source_folder)
 			echo "The source folder $2 was expected in the workspace but it is missing!" >&2
