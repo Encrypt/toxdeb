@@ -226,6 +226,7 @@ prepare_source() {
 	local parent_folder
 	local changelog_file changelog_footer
 	local manpage
+	local line version_line cur_sec fin_sec
 	
 	# Sets the parent_folder
 	parent_folder="${CLIENT_NAME,,}-${client_version}"
@@ -288,16 +289,59 @@ prepare_source() {
 		# Delete all lines but keep the header
 		sed -i '1,2!d' debian/changelog
 		
-		# Inserts the changelog
-		gawk '{if(match($0, /## v?([0-9]\.){2}[0-9].*/) != 0){i++} ; if(match($0, /#### .*/) != 0){j++} ; if(i != 2 && j >= 1){print} else if(i == 2){exit}}' ${changelog_file} | \
-		sed -e '/^</d' \
-			-e '/^$/d' \
-			-e 's/  \+\([^*]\)/ \1/g' \
-			-e 's/[*]\{2,\}//g' \
-			-e 's/#### \(.*\)/\n  * \1:/' \
-			-e 's/ (\[[0-9a-f]\{8\}\].*//' \
-			-e 's/^\( *\)[*]/    \1*/' \
-		>> debian/changelog
+		# Find the section to extract the changelog, default: "Unreleased"
+		fin_sec=0
+		for version_line in "v${client_version}" "Unreleased"
+		do
+		
+			# Reset the current section read
+			cur_sec=1
+			
+			# Try to find it in the changelog
+			while read line
+			do
+				[[ "$line" =~ "[${version_line}]" ]] \
+					&& { fin_sec=${cur_sec} ; break ; } \
+					|| cur_sec=$((${cur_sec} + 1))
+			done < <(grep '^##' ${changelog_file})
+			
+			# If a match has been found, exit
+			[[ ${fin_sec} -ne 0 ]] && break
+			
+		done
+		
+		# If a matching line has been found
+		if [[ ${fin_sec} -ne 0 ]]
+		then
+			
+			# Inform about the changelog entry taken
+			echo "INFO: Generating the changelog using section \"${version_line}\" of CHANGELOG.md."
+			
+			# Parse the markdown
+			gawk -v section=${fin_sec} '{
+				if(match($0, /^##/) != 0) {
+					i++
+					next
+				}
+				if(i == section){
+					if(match($0, /^[*]{2}/)) {
+						gsub(/[*]/, "")
+						print "  *", $0
+					} else if (match($0, /^-/)){
+						gsub(/^- /, "")
+						$0 = gensub(/\\([_()#])/, "\\1", "g")
+						sub(/ \[#[0-9]*\].*/, "")
+						print "    -", $0
+					}
+				}
+			}' ${changelog_file} \
+			>> debian/changelog
+		
+		# Else, no changelog is available
+		else
+			echo 'WARNING: The CHANGELOG.md file could not be parsed! No changelog will be produced.'
+			echo '  * No changelog available.' >> debian/changelog
+		fi
 		
 		# Add the footer
 		echo -e "\n${changelog_footer}" >> debian/changelog
