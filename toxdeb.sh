@@ -32,10 +32,12 @@ main() {
 	local conf_file
 	
 	# Check the number of arguments before going forward
-	[[ ${ARGS_NB} -lt 1 ]] && { error 'argument_missing' ; return $? ; }
+	[[ ${ARGS_NB} -lt 1 ]] \
+		&& { error 'argument_missing' ; return $? ; }
 	
 	# Warn if this is run as root
-	[[ $(id -u) -eq 0 ]] && echo "WARNING: That's weird, this script shouldn't be running with root privileges (<.<)"
+	[[ $(id -u) -eq 0 ]] \
+		&& echo "WARNING: That's weird, this script shouldn't be running with root privileges (<.<)"
 		
 	# Get the command given
 	case ${ARGS[0]} in
@@ -78,7 +80,8 @@ main() {
 				manual)
 					
 					# Check the number of arguments before going forward
-					[[ ${ARGS_NB} -ne 8 ]] && { error 'manual_options' ; return $? ; }
+					[[ ${ARGS_NB} -ne 8 ]] \
+						&& { error 'manual_options' ; return $? ; }
 			
 					# Get the arguments
 					for i in 2 4 6
@@ -101,7 +104,8 @@ main() {
 					done
 					
 					# Test if the configuration file exists
-					[[ -e "$conf_file" ]] || { error 'conf_file' "${conf_file}" ; return $? ; }
+					[[ -e "$conf_file" ]] \
+						|| { error 'conf_file' "${conf_file}" ; return $? ; }
 					;;
 				
 				# Wrong argument
@@ -116,7 +120,7 @@ main() {
 			
 			# Tests the presence of the source folder
 			[[ -d "${CLIENT_NAME,,}_src" ]] \
-				|| { error 'source_folder' "${CLIENT_NAME,,}_src" ; return $? ;}
+				|| { error 'source_folder' "${CLIENT_NAME,,}_src" ; return $? ; }
 			
 			# Get the client version
 			client_version=$(get_version)
@@ -195,7 +199,7 @@ get_version() {
 	version_files=($(find "${CLIENT_NAME,,}_src" -name "${VERSION_FILE}"))
 	
 	# Return the version
-	echo $(grep VERSION ${version_files[@]} | grep -oE '([0-9]{1,}\.)+[0-9]{1,}')
+	echo $(grep -i version ${version_files[@]} | grep -oE '([0-9]{1,}\.)+[0-9]{1,}')
 	
 	return 0
 }
@@ -225,7 +229,7 @@ prepare_source() {
 	local distribution=$2
 	local parent_folder
 	local changelog_file changelog_footer
-	local manpage
+	local manpage override
 	local line version_line cur_sec fin_sec
 	
 	# Sets the parent_folder
@@ -271,8 +275,19 @@ prepare_source() {
 	 title="${CLIENT_NAME}" command="/usr/bin/${CLIENT_NAME,,}"
 	EOF
 	
-	# Set the destination prefix as /
-	echo -e 'override_dh_auto_install:\n\tdh_auto_install -- PREFIX=/usr' >> debian/rules
+	# Extra args to give to the global dh directive
+	[[ -n "$DH_EXTRA_ARGS" ]] \
+		&& sed -i "s/dh \$@/dh \$@ ${DH_EXTRA_ARGS}/" debian/rules
+	
+	# Extra dh overrides
+	if [[ -n "${DH_EXTRA_OVERRIDES[@]}" ]]
+	then
+		for override in "${DH_EXTRA_OVERRIDES[@]}"
+		do
+			echo "$(echo $override | cut -d ' ' -f 1)" >> debian/rules
+			echo -e "\t$(echo $override | cut -d ' ' -f 2-)" >> debian/rules
+		done
+	fi
 	
 	# Set the distribution
 	sed -i "1s/unstable/${distribution}/g" debian/changelog
