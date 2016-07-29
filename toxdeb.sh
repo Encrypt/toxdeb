@@ -28,7 +28,7 @@ main() {
 	
 	# Local variables
 	local client_version config i
-	local config client dist arch
+	local client dist arch branch
 	local conf_file
 	
 	# Check the number of arguments before going forward
@@ -47,23 +47,22 @@ main() {
 			
 			# Get the configuration...
 			case ${ARGS[1]} in
-			
+				
 				# ... based on the name of the Jenkins job
 				auto)
 					
 					# Get the information from the Jenkins job name
-					config=$(get_config_auto)
-					client=$(echo $config | cut -d ',' -f 1)
-					dist=$(echo $config | cut -d ',' -f 2)
-					arch=$(echo $config | cut -d ',' -f 3)
+					client=$(get_job_info 'client_name')
+					dist=$(get_job_info 'distribution')
+					arch=$(get_job_info 'architecture')
+					branch=$(get_job_info 'branch')
 					
 					# Use the specific config file if possible
 					if [[ -e "./configs/${client}-${dist}.cfg" ]]
 					then
-						echo "INFO: Using configuration file ${client}-${dist}.cfg"
 						conf_file="./configs/${client}-${dist}.cfg"
 						
-					# If it doesn't exist, use the default one
+					# Else use the default one
 					elif [[ -e "./configs/${client}-default.cfg" ]]
 					then
 						echo "INFO: Using configuration file ${client}-default.cfg"
@@ -80,11 +79,11 @@ main() {
 				manual)
 					
 					# Check the number of arguments before going forward
-					[[ ${ARGS_NB} -ne 8 ]] \
+					[[ ${ARGS_NB} -ne 10 ]] \
 						&& { error 'manual_options' ; return $? ; }
 			
 					# Get the arguments
-					for i in 2 4 6
+					for i in 2 4 6 8
 					do
 						case ${ARGS[$i]} in
 							--conf)
@@ -96,16 +95,15 @@ main() {
 							--arch)
 								arch=${ARGS[$(($i + 1))]}
 								;;
+							--branch)
+								branch=${ARGS[$(($i + 1))]}
+								;;
 							*)
 								error 'unknown_option' "${ARGS[$i]}"
 								return $?
 								;;
 						esac
 					done
-					
-					# Test if the configuration file exists
-					[[ -e "$conf_file" ]] \
-						|| { error 'conf_file' "${conf_file}" ; return $? ; }
 					;;
 				
 				# Wrong argument
@@ -115,27 +113,34 @@ main() {
 					;;
 			esac
 			
-			# Source the configuration file
-			source ${conf_file}
+			# If the configuration file exists, sources it
+			if [[ -e "$conf_file" ]]
+			then
+				echo "INFO: Using configuration file ${conf_file##*/}"
+				source ${conf_file}
+			else
+				error 'conf_file' "${conf_file##*/}"
+				return $?
+			fi
 			
-			# Tests the presence of the source folder
+			# Test the presence of the source folder
 			[[ -d "${CLIENT_NAME,,}_src" ]] \
 				|| { error 'source_folder' "${CLIENT_NAME,,}_src" ; return $? ; }
 			
 			# Get the client version
 			client_version=$(get_version)
 			
-			# Prepares the folders
-			prepare_folders "$client_version" || return $?
+			# Fill the debian/ folder template
+			fill_templates "${client_version}" "$dist" "$arch" "$branch"
 			
-			# Prepares the source to be built
-			prepare_source "$client_version" "$dist" || return $?
+			# Prepare the source to be built
+			prepare_source "${client_version}" "$dist" || return $?
 			
 			# Launch the build process
 			build_client "$dist" "$arch" || return $?
 			;;
 			
-		# Displays the help
+		# Display the help
 		help)
 			help
 			return $?
@@ -152,44 +157,7 @@ main() {
 	return 0
 }
 
-# Get the build information (for auto mode)
-get_config_auto() {
-
-	# Local variables
-	local client dist arch
-	local config
-	
-	# Gets the client name
-	client=$(echo ${JOB_NAME} | cut -d '_' -f 1)
-	
-	# Gets the distribution
-	config=$(echo ${JOB_NAME} | grep -o 'wheezy\|jessie\|stretch\|sid\|trusty\|utopic\|vivid\|wily\|xenial')
-	[[ -n "$config" ]] \
-		&& dist="$config" \
-		|| { error 'auto_config' 'distribution' ; return $? ; }
-	
-	# Gets the architecture
-	config=$(echo ${JOB_NAME} | grep -o '_x86_\|_x86-64_')
-	case $config in
-		'_x86_')
-			arch='i386'
-			;;
-		'_x86-64_')
-			arch='amd64'
-			;;
-		*)
-			error 'auto_config' 'architecture'
-			return $?
-			;;
-	esac
-	
-	# Returns the parameters found
-	echo "${client,,},${dist},${arch}"
-	
-	return 0
-}
-
-# Gets the version of the client
+# Get the version of the client
 get_version() {
 
 	# Local variables
@@ -199,24 +167,122 @@ get_version() {
 	version_files=($(find "${CLIENT_NAME,,}_src" -name "${VERSION_FILE}"))
 	
 	# Return the version
-	echo $(grep -i version ${version_files[@]} | grep -oE '([0-9]{1,}\.)+[0-9]{1,}')
+	echo $(grep -i version ${version_files[@]} | grep -oE '([0-9]{1,}\.){2}[0-9]{1,}')
 	
 	return 0
 }
 
-# Set up correctly the folders for dh_make
-prepare_folders() {
+# Get information from the job name
+get_job_info() {
+
+	# Local variables
+	local attribute=$1
+	local tmp value
+	
+	case $attribute in
+		
+		# Get the distribution
+		distribution)
+			value=$(echo ${JOB_NAME} | grep -o 'wheezy\|jessie\|stretch\|sid\|trusty\|utopic\|vivid\|wily\|xenial')
+			;;
+		
+		# Get the client name
+		client_name)
+			value=$(echo ${JOB_NAME} | cut -d '_' -f 1)
+			;;
+		
+		# Get the architecture
+		architecture)
+			tmp=$(echo ${JOB_NAME} | grep -o '_x86_\|_x86-64_')
+			case $tmp in
+				'_x86_')
+					value='i386'
+					;;
+				'_x86-64_')
+					value='amd64'
+					;;
+			esac
+			;;
+		
+		# Get the branch (stable or nightly)
+		branch)
+			value=$(echo ${JOB_NAME} | grep -o 'stable\|nightly')
+			;;
+		
+	esac
+	
+	# Return the value requested (lowercase)
+	[[ -n "$value" ]] \
+		&& echo "${value,,}" \
+		|| { error 'auto_config' "$attribute" ; return $? ; }
+			
+	return 0
+}
+
+# Fills the templates of the debian/ folder
+fill_templates() {
 
 	# Local variables
 	local client_version=$1
-	local parent_folder
+	local distribution=$2
+	local architecture=$3
+	local branch=$4
+	local packages_url debian_revision
+	local date_rfc year
 	
-	# Correctly rename the source folder (becoming the parent folder)
-	parent_folder="${CLIENT_NAME,,}-${client_version}"
-	mv "${CLIENT_NAME,,}_src" "${parent_folder}"
+	# Date-related stuff
+	date_rfc=$(date -R)
+	year=$(date '+%Y')
 	
-	# Convert the source as a .tar.gz archive
-	tar -zcf "${parent_folder}.tar.gz" "${parent_folder}"
+	# Get the revision number from pkg.tox.chat
+	packages_url="https://pkg.tox.chat/debian/dists/stable/${distribution}/binary-${architecture}/Packages"
+	debian_revision=$(wget -qO - "${packages_url}" \
+		| grep "^Filename:.*${CLIENT_NAME,,}" \
+		| grep -oE "$(echo ${client_version} | sed 's/\./\\\./g')-[0-9]{1}" \
+		| cut -d '-' -f 2)
+	
+	# Set the revision
+	[[ -z debian_revision ]] \
+		&& debian_revision=1 \
+		|| debian_revision=$((${debian_revision} + 1))
+	
+	# Go in the debian/ folder
+	cd debian
+	
+	# Proceed to the changes which do not need logic
+	sed -e "s/#BUILD_DEPENDS#/${BUILD_DEPENDS}/g" \
+		-e "s/#CLIENT_NAME#/${CLIENT_NAME}/g" \
+		-e "s/#CLIENT_VERSION#/${client_version}/g" \
+		-e "s,#COPYRIGHT_ORGANISATION#,${COPYRIGHT_ORGANISATION},g" \
+		-e "s,#COPYRIGHT_WEBSITE#,${COPYRIGHT_WEBSITE},g" \
+		-e "s/#COPYRIGHT_YEARS#/${COPYRIGHT_YEARS}/g" \
+		-e "s/#DATE_RFC#/${date_rfc}/g" \
+		-e "s/#DEBIAN_REVISION#/${debian_revision}/g" \
+		-e "s/#DEPENDS#/${DEPENDS}/g" \
+		-e "s/#DESC_LONG#/${DESC_LONG}/g" \
+		-e "s/#DESC_SHORT#/${DESC_SHORT}/g" \
+		-e "s,#DH_EXTRA_ARGS#,${DH_EXTRA_ARGS},g" \
+		-e "s/#DISTRIBUTION#/${distribution}/g" \
+		-e "s,#GIT_REPO#,${GIT_REPO},g" \
+		-e "s,#HTTP_REPO#,${HTTP_REPO},g" \
+		-e "s/#LC_CLIENT_NAME#/${CLIENT_NAME,,}/g" \
+		-e "s/#MAINT_EMAIL#/${MAINT_EMAIL}/g" \
+		-e "s/#MAINT_NAME#/${MAINT_NAME}/g" \
+		-e "s/#YEAR#/${year}/g" \
+		-i $(ls)
+
+	# Extra dh overrides
+	if [[ -n "${DH_EXTRA_OVERRIDES[@]}" ]]
+	then
+		for override in "${DH_EXTRA_OVERRIDES[@]}"
+		do
+			echo "$(echo $override | cut -d ' ' -f 1)" >> rules
+			echo -e "\t$(echo $override | cut -d ' ' -f 2-)" >> rules
+		done
+	fi
+	
+	# Back to the parent directory
+	cd ..
 	
 	return 0
 }
@@ -232,35 +298,18 @@ prepare_source() {
 	local manpage override
 	local line version_line cur_sec fin_sec
 	
-	# Sets the parent_folder
+	# Rename the parent folder
 	parent_folder="${CLIENT_NAME,,}-${client_version}"
+	mv "${CLIENT_NAME,,}_src" "${parent_folder}"
 	
-	# Invoke dh_make to prepare the source
-	export DEBFULLNAME="${MAINT_NAME}"
-	export DEBEMAIL="${MAINT_EMAIL}"
+	# Convert the source as a .orig.tar.gz archive
+	tar -zcf "${CLIENT_NAME,,}_${client_version}.orig.tar.gz" "${parent_folder}"
 	
+	# Copy the "almost" complete debian/ folder
+	cp -r debian/ ${parent_folder}
+	
+	# Goes in the folder
 	cd ${parent_folder}
-	dh_make -s -y -c gpl3 -f "../${parent_folder}.tar.gz"
-	
-	# Cleaning of the debian/ directory
-	rm debian/{*.ex,*.EX,docs,README.*}
-	
-	# Complete the control file
-	sed -e "s/Section:.*/Section: ${SECTION_TYPE}/g" \
-		-e "s/Build-Depends:.*/Build-Depends: ${BUILD_DEPENDENCIES}/g" \
-		-e "s,Homepage:.*,Homepage: ${COPYRIGHT_WEBSITE},g" \
-		-e "s,#Vcs-Git:.*,Vcs-Git: ${GIT_REPO},g" \
-		-e "s,#Vcs-Browser:.*,Vcs-Browser: ${HTTP_REPO},g" \
-		-e "s/<insert up to 60 chars description>/${DESC_SHORT}/g" \
-		-e "s/<insert long description, indented with spaces>/${DESC_LONG}/g" \
-		-i debian/control
-	
-	# Correctly set-up the copyright info
-	sed -e "s/<years>/${COPYRIGHT_YEARS}/g" \
-		-e "s,<put author's name and email here>,${COPYRIGHT_ORGANISATION},g" \
-		-e "s,<url://example.com>,${COPYRIGHT_WEBSITE},g" \
-		-e '/#/d;/<likewise for another author>/d' \
-		-i debian/copyright
 	
 	# Add the manpage
 	manpage=$(find . -name ${CLIENT_NAME,,}.1)
@@ -268,43 +317,13 @@ prepare_source() {
 		&& cp $manpage debian/ \
 		|| echo 'WARNING: No manpage found!'
 	
-	# Set the menu file
-	cat <<- EOF > debian/menu
-	?package(${CLIENT_NAME,,}):needs="X11" \\
-	 section="Applications/Network/Communication" \\
-	 title="${CLIENT_NAME}" command="/usr/bin/${CLIENT_NAME,,}"
-	EOF
-	
-	# Extra args to give to the global dh directive
-	[[ -n "$DH_EXTRA_ARGS" ]] \
-		&& sed -i "s/dh \$@/dh \$@ ${DH_EXTRA_ARGS}/" debian/rules
-	
-	# Extra dh overrides
-	if [[ -n "${DH_EXTRA_OVERRIDES[@]}" ]]
-	then
-		for override in "${DH_EXTRA_OVERRIDES[@]}"
-		do
-			echo "$(echo $override | cut -d ' ' -f 1)" >> debian/rules
-			echo -e "\t$(echo $override | cut -d ' ' -f 2-)" >> debian/rules
-		done
-	fi
-	
-	# Set the distribution
-	sed -i "1s/unstable/${distribution}/g" debian/changelog
-	
-	# Adds changelog from CHANGELOG.md
+	# Add changelog from CHANGELOG.md
 	changelog_file=$(find . -name 'CHANGELOG.md')
 	
 	if [[ -n "$changelog_file" ]]
 	then
-	
-		# Saves the footer
-		changelog_footer=$(grep ' --' debian/changelog)
 		
-		# Delete all lines but keep the header
-		sed -i '1,2!d' debian/changelog
-		
-		# Find the section to extract the changelog, default: "Unreleased"
+		# Find the section from which to extract the changelog, default: "Unreleased"
 		fin_sec=0
 		for version_line in "v${client_version}" "Unreleased"
 		do
@@ -332,38 +351,52 @@ prepare_source() {
 			# Inform about the changelog entry taken
 			echo "INFO: Generating the changelog using section \"${version_line}\" of CHANGELOG.md."
 			
-			# Parse the markdown
-			gawk -v section=${fin_sec} '{
-				if(match($0, /^##/) != 0) {
-					i++
-					next
-				}
-				if(i == section){
-					if(match($0, /^[*]{2}/)) {
-						gsub(/[*]/, "")
-						print "  *", $0
-					} else if (match($0, /^-/)){
-						gsub(/^- /, "")
-						$0 = gensub(/\\([_()#])/, "\\1", "g")
-						sub(/ \[#[0-9]*\].*/, "")
-						print "    -", $0
-					}
-				}
-			}' ${changelog_file} \
-			>> debian/changelog
+			# Insert the changelog at the right place
+			while IFS= read line
+			do
+			
+				# It's the right place to insert the changelog
+				if [[ "$line" == '#CHANGELOG#' ]]
+				then
+				
+					gawk -v section=${fin_sec} '{
+						if(match($0, /^##/) != 0) {
+							i++
+							next
+						}
+						if(i == section){
+							if(match($0, /^[*]{2}/)) {
+								gsub(/[*]/, "")
+								print "  *", $0
+							} else if (match($0, /^-/)){
+								gsub(/^- /, "")
+								$0 = gensub(/\\([_()#])/, "\\1", "g")
+								sub(/ \[#[0-9]*\].*/, "")
+								print "    -", $0
+							}
+						}
+					}' ${changelog_file} \
+					>> debian/changelog_tmp
+				
+				# Else, echo the line
+				else
+					echo "$line" >> debian/changelog_tmp
+				fi
+			
+			done < <(cat debian/changelog)
+			
+			# Moves the temporary changelog
+			mv debian/changelog_tmp debian/changelog
 		
 		# Else, no changelog is available
 		else
 			echo 'WARNING: The CHANGELOG.md file could not be parsed! No changelog will be produced.'
-			echo '  * No changelog available.' >> debian/changelog
+			sed -i 's/#CHANGELOG#/  * No changelog available./' debian/changelog
 		fi
-		
-		# Add the footer
-		echo -e "\n${changelog_footer}" >> debian/changelog
-		
+	
 	else
 		echo 'WARNING: No CHANGELOG.md found! No changelog will be produced.'
-		sed -i 's/^  [*].*/  * No changelog available./g' debian/changelog
+		sed -i 's/#CHANGELOG#/  * No changelog available./' debian/changelog
 	fi
 	
 	# Call dpkg-source to generate the .dsc file
@@ -390,7 +423,8 @@ build_client() {
 	# Call pbuilder
 	sudo pbuilder --update --override-config
 	sudo pbuilder build --buildresult $PWD *.dsc
-	[[ $? -ne 0 ]] && { error 'pbuilder_failed' ; return $?; }
+	[[ $? -ne 0 ]] \
+		&& { error 'pbuilder_failed' ; return $?; }
 	
 	return 0
 }
@@ -400,7 +434,7 @@ error() {
 
 	local err=$1
 
-	# Displays the error
+	# Display the error
 	echo -n 'ERROR: ' >&2
 	case $err in
 		argument_missing)
@@ -414,7 +448,7 @@ error() {
 			echo "The source folder $2 was expected in the workspace but it is missing!" >&2
 			;;
 		auto_config)
-			echo "Couldn't find automatically the $2 for this job." >&2
+			echo "Couldn't automatically find the attribute \"$2\" for this job." >&2
 			echo "Please rename your job or use the manual option." >&2
 			;;
 		manual_options)
@@ -453,6 +487,7 @@ help() {
 	  --conf: Path to the configuration file.
 	  --dist: Sets the target distribution.
 	  --arch: Sets the target architecture.
+	  --branch: The type of build (stable or nightly)
 	
 	One will probably run: ./${PROGNAME} build auto for a job such as "uTox_pkg_linux_deb_shared_jessie_x86-64_nightly_release"
 	In case of manual configuration: ./${PROGNAME} build --dist jessie --arch amd64 --conf ./configs/utox-jessie.cfg

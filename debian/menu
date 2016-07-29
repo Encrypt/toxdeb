@@ -1,0 +1,3 @@
+?package(#LC_CLIENT_NAME#):needs="X11" \
+  section="Applications/Network/Communication" \
+  title="#CLIENT_NAME#" command="/usr/bin/#LC_CLIENT_NAME#"

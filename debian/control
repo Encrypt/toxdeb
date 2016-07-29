@@ -1,0 +1,15 @@
+Source: #LC_CLIENT_NAME#
+Section: net
+Priority: optional
+Maintainer: #MAINT_NAME# <#MAINT_EMAIL#>
+Build-Depends: #BUILD_DEPENDS#
+Standards-Version: 3.9.5
+Homepage: #COPYRIGHT_WEBSITE#
+Vcs-Git: #GIT_REPO#
+Vcs-Browser: #HTTP_REPO#
+
+Package: #LC_CLIENT_NAME#
+Architecture: any
+Depends: #DEPENDS#
+Description: #DESC_SHORT#
+ #DESC_LONG#
