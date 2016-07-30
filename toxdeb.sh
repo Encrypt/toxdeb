@@ -27,7 +27,7 @@ readonly ARGS_NB=$#
 main() {
 	
 	# Local variables
-	local client_version config i
+	local client_version i
 	local client dist arch branch
 	local conf_file
 	
@@ -65,7 +65,6 @@ main() {
 					# Else use the default one
 					elif [[ -e "./configs/${client}-default.cfg" ]]
 					then
-						echo "INFO: Using configuration file ${client}-default.cfg"
 						conf_file="./configs/${client}-default.cfg"
 					
 					# Else, you can't go much further :P
@@ -131,10 +130,10 @@ main() {
 			client_version=$(get_version)
 			
 			# Fill the debian/ folder template
-			fill_templates "${client_version}" "$dist" "$arch" "$branch"
+			fill_templates "${client_version}" "$dist" "$arch" "$branch" || return $?
 			
 			# Prepare the source to be built
-			prepare_source "${client_version}" "$dist" || return $?
+			prepare_source "${client_version}" || return $?
 			
 			# Launch the build process
 			build_client "$dist" "$arch" || return $?
@@ -229,17 +228,17 @@ fill_templates() {
 	local branch=$4
 	local packages_url debian_revision
 	local date_rfc year
+	local override
 	
 	# Date-related stuff
 	date_rfc=$(date -R)
 	year=$(date '+%Y')
 	
 	# Get the revision number from pkg.tox.chat
-	packages_url="https://pkg.tox.chat/debian/dists/stable/${distribution}/binary-${architecture}/Packages"
+	packages_url="https://pkg.tox.chat/debian/dists/${branch}/${distribution}/binary-${architecture}/Packages"
 	debian_revision=$(wget -qO - "${packages_url}" \
-		| grep "^Filename:.*${CLIENT_NAME,,}" \
-		| grep -oE "$(echo ${client_version} | sed 's/\./\\\./g')-[0-9]{1}" \
-		| cut -d '-' -f 2)
+		| grep -E "^Filename:.*${CLIENT_NAME,,}_([0-9]{1,}\.){2}[0-9]{1,}-[0-9]{1,}_${architecture}.deb$" \
+		| gawk -F '[-_]' '{print $3}')
 	
 	# Set the revision
 	[[ -z debian_revision ]] \
@@ -269,7 +268,7 @@ fill_templates() {
 		-e "s/#MAINT_EMAIL#/${MAINT_EMAIL}/g" \
 		-e "s/#MAINT_NAME#/${MAINT_NAME}/g" \
 		-e "s/#YEAR#/${year}/g" \
-		-i $(ls)
+		-i $(find . -type f)
 
 	# Extra dh overrides
 	if [[ -n "${DH_EXTRA_OVERRIDES[@]}" ]]
@@ -292,10 +291,9 @@ prepare_source() {
 
 	# Local variables
 	local client_version=$1
-	local distribution=$2
 	local parent_folder
-	local changelog_file changelog_footer
-	local manpage override
+	local changelog_file
+	local manpage
 	local line version_line cur_sec fin_sec
 	
 	# Rename the parent folder
@@ -305,8 +303,8 @@ prepare_source() {
 	# Convert the source as a .orig.tar.gz archive
 	tar -zcf "${CLIENT_NAME,,}_${client_version}.orig.tar.gz" "${parent_folder}"
 	
-	# Copy the "almost" complete debian/ folder
-	cp -r debian/ ${parent_folder}
+	# Move the "almost" complete debian/ folder
+	mv debian ${parent_folder}
 	
 	# Goes in the folder
 	cd ${parent_folder}
@@ -459,7 +457,7 @@ error() {
 			echo "Unknown argument $2 for $3." >&2
 			;;
 		unknown_option)
-			echo "Unknown option $2 for operation \"prepare\"." >&2
+			echo "Unknown option $2 for operation \"manual\"." >&2
 			;;
 		pbuilder_failed)
 			echo "Pbuilder failed. Consult the logs for more information." >&2
