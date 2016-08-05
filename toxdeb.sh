@@ -294,7 +294,7 @@ prepare_source() {
 	local parent_folder
 	local changelog_file
 	local manpage
-	local line version_line cur_sec fin_sec
+	local line gawk_var
 	
 	# Rename the parent folder
 	parent_folder="${CLIENT_NAME,,}-${client_version}"
@@ -322,32 +322,16 @@ prepare_source() {
 	then
 		
 		# Find the section from which to extract the changelog, default: "Unreleased"
-		fin_sec=0
-		for version_line in "v${client_version}" "Unreleased"
-		do
-		
-			# Reset the current section read
-			cur_sec=1
-			
-			# Try to find it in the changelog
-			while read line
-			do
-				[[ "$line" =~ "[${version_line}]" ]] \
-					&& { fin_sec=${cur_sec} ; break ; } \
-					|| cur_sec=$((${cur_sec} + 1))
-			done < <(grep '^##' ${changelog_file})
-			
-			# If a match has been found, exit
-			[[ ${fin_sec} -ne 0 ]] && break
-			
-		done
+		grep "^## \[v${client_version}\]" $changelog_file \
+			&& gawk_var="v${client_version}" \
+			|| { grep '^## \[Unreleased\]' $changelog_file && gawk_var='Unreleased' ; }
 		
 		# If a matching line has been found
-		if [[ ${fin_sec} -ne 0 ]]
+		if [[ -n "${gawk_var}" ]]
 		then
 			
 			# Inform about the changelog entry taken
-			echo "INFO: Generating the changelog using section \"${version_line}\" of CHANGELOG.md."
+			echo "INFO: Generating the changelog using section \"${gawk_var}\" of CHANGELOG.md."
 			
 			# Insert the changelog at the right place
 			while IFS= read line
@@ -356,22 +340,16 @@ prepare_source() {
 				# It's the right place to insert the changelog
 				if [[ "$line" == '#CHANGELOG#' ]]
 				then
-				
-					gawk -v section=${fin_sec} '{
-						if(match($0, /^##/) != 0) {
-							i++
-							next
-						}
-						if(i == section){
-							if(match($0, /^[*]{2}/)) {
-								gsub(/[*]/, "")
-								print "  *", $0
-							} else if (match($0, /^-/)){
-								gsub(/^- /, "")
-								$0 = gensub(/\\([_()#])/, "\\1", "g")
-								sub(/ \[#[0-9]*\].*/, "")
-								print "    -", $0
-							}
+
+					gawk -v version=${gawk_var} '$0 ~ "^## \\[" version "\\].+",/^##/ && $0 !~ version {
+						if(match($0, /^[*]{2}/)) {
+							gsub(/[*]/, "")
+							print "  *", $0
+						} else if (match($0, /^-/)){
+							gsub(/^- /, "")
+							$0 = gensub(/\\([_()#])/, "\\1", "g")
+							sub(/ \[#[0-9]*\].*/, "")
+							print "    -", $0
 						}
 					}' ${changelog_file} \
 					>> debian/changelog_tmp
@@ -386,13 +364,12 @@ prepare_source() {
 			# Moves the temporary changelog
 			mv debian/changelog_tmp debian/changelog
 		
-		# Else, no changelog is available
-		else
-			echo 'WARNING: The CHANGELOG.md file could not be parsed! No changelog will be produced.'
-			sed -i 's/#CHANGELOG#/  * No changelog available./' debian/changelog
 		fi
+	fi
 	
-	else
+	# If there is no changelog or no matching section was used
+	if [[ -z "${changelog_file}" || -z "${gawk_var}" ]]
+	then
 		echo 'WARNING: No CHANGELOG.md found! No changelog will be produced.'
 		sed -i 's/#CHANGELOG#/  * No changelog available./' debian/changelog
 	fi
@@ -422,7 +399,7 @@ build_client() {
 	sudo pbuilder --update --override-config
 	sudo pbuilder build --buildresult $PWD *.dsc
 	[[ $? -ne 0 ]] \
-		&& { error 'pbuilder_failed' ; return $?; }
+		&& { error 'pbuilder_failed' ; return $? ; }
 	
 	return 0
 }
