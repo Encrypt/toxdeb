@@ -237,7 +237,7 @@ fill_templates() {
 	# Get the revision number from pkg.tox.chat
 	packages_url="https://pkg.tox.chat/debian/dists/${branch}/${distribution}/binary-${architecture}/Packages"
 	debian_revision=$(wget -qO - "${packages_url}" \
-		| grep -E "^Filename:.*${CLIENT_NAME,,}_([0-9]{1,}\.){2}[0-9]{1,}-[0-9]{1,}_${architecture}.deb$" \
+		| grep -E "^Filename:.*${CLIENT_NAME,,}_${client_version}-[0-9]{1,}_${architecture}.deb$" \
 		| gawk -F '[-_]' '{print $3}')
 	
 	# Set the revision
@@ -322,9 +322,9 @@ prepare_source() {
 	then
 		
 		# Find the section from which to extract the changelog, default: "Unreleased"
-		grep "^## \[v${client_version}\]" $changelog_file \
+		grep -q "^## \[v${client_version}\]" $changelog_file \
 			&& gawk_var="v${client_version}" \
-			|| { grep '^## \[Unreleased\]' $changelog_file && gawk_var='Unreleased' ; }
+			|| { grep -q '^## \[Unreleased\]' $changelog_file && gawk_var='Unreleased' ; }
 		
 		# If a matching line has been found
 		if [[ -n "${gawk_var}" ]]
