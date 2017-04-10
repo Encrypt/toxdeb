@@ -182,7 +182,7 @@ get_job_info() {
 		
 		# Get the distribution
 		distribution)
-			value=$(echo ${JOB_NAME} | grep -o 'jessie\|stretch\|sid\|xenial\|yakkety')
+			value=$(echo ${JOB_NAME} | grep -o 'jessie\|stretch\|sid\|xenial\|yakkety\|zesty')
 			;;
 		
 		# Get the client name
